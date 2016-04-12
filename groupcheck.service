@@ -1,0 +1,11 @@
+[Unit]
+Description=groupcheck -- minimal polkit replacement
+
+[Service]
+User=groupcheck
+Type=dbus
+BusName=org.freedesktop.PolicyKit1
+ExecStart=/usr/sbin/groupcheck
+
+[Install]
+WantedBy=multi-user.target

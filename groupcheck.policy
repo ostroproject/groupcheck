@@ -1,0 +1,2 @@
+org.freedesktop.systemd1.reload-daemon="adm,wheel"
+org.freedesktop.login1.reboot="adm"
