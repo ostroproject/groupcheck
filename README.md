@@ -36,7 +36,7 @@ one file.
 
 Policy files look like this:
 
-    # let both amd and wheel groups trigger service file reload
+    # let both adm and wheel groups trigger service file reload
     org.freedesktop.systemd1.reload-daemon="adm,wheel"
     org.freedesktop.login1.reboot="adm"
 
