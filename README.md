@@ -15,8 +15,8 @@ libsystemd. Because libsystemd is already in use in all systemd-based
 distributions, groupcheck's practical memory footprint is very small.
 
 Polkit is not very suitable for embedded systems, because the policy
-rules are written in JavaScript. Because of that polkit brings with it
-Mozilla's large JavaScript engine. Many polkit features are
+rules are written in JavaScript. Polkit uses Mozilla's large JavaScript
+engine to run the policy scripts. Many polkit features are
 desktop-focused, such as providing authorization backends so that the
 user may be queried for permission to perform an action. In a typical
 embedded system, the "user" concept is different from desktop use.
@@ -52,8 +52,8 @@ in group `adm` is allowed to do action `org.freedesktop.login1.reboot`.
 Other uids are not allowed to do either action. Actions not listed in
 the policy file are not allowed.
 
-Imporovement ideas
-------------------
+Improvement ideas
+-----------------
 
 * Make policy files to be read from a `.d` directory, allowing services
   to drop in their own policy files.
