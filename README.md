@@ -23,6 +23,26 @@ embedded system, the "user" concept is different from desktop use.
 Groupcheck does not implement those parts of polkit D-Bus API that deal
 with registration of authorization backends.
 
+```
+                .------------.
+                | groupcheck |
+                '------------'
+                      ^ | allowed/disallowed
+   CheckAuthorization | |
+   (action,process)   | v
+              .----------------.
+              | system service |----> if allowed, perform
+              '----------------'      the requested action
+                       ^
+                       |
+        request action |
+           .----------------------.
+           | process requesting a |
+           | a system service to  |
+           | do something         |
+           '----------------------'
+```
+
 Using groupcheck
 ----------------
 
@@ -51,6 +71,19 @@ allowed to do action `org.freedesktop.systemd1.reload-daemon` and uids
 in group `adm` is allowed to do action `org.freedesktop.login1.reboot`.
 Other uids are not allowed to do either action. Actions not listed in
 the policy file are not allowed.
+
+Caller responsibilities
+-----------------------
+
+Groupcheck works in asynchronous fashion. When a request comes in, groupcheck
+does its policy evaluation based on the best information available at the time.
+The caller (typically a system service) needs to ensure that nothing that
+affects the evaluation has changed between the time the request to groupcheck is
+made and the answer comes back. For example, if a process requests the system
+service to perform an action and then dies, the answer from groupcheck based on
+the PID is no longer valid, because the PID can now belong to completely
+different process. The same concept applies also to things like D-Bus connection
+IDs.
 
 Improvement ideas
 -----------------
