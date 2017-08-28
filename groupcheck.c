@@ -95,7 +95,7 @@ static bool check_allowed(sd_bus *bus, struct line_data *data,
             | SD_BUS_CREDS_PID | SD_BUS_CREDS_GID | SD_BUS_CREDS_UID;
     const gid_t *gids = NULL;
     int n_gids = 0;
-    pid_t ruid, euid;
+    uid_t ruid, euid;
 
     /* find first the corresponding group data from the policy */
 
@@ -602,7 +602,7 @@ static int property_backend_features(sd_bus *bus, const char *path,
         const char *interface, const char *property, sd_bus_message *reply,
         void *userdata, sd_bus_error *error)
 {
-    /* we don't support temprorary authorizations */
+    /* we don't support temporary authorizations */
     return sd_bus_message_append(reply, "u", 0);
 }
 
