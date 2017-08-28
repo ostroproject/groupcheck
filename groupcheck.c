@@ -24,49 +24,7 @@
 #include <systemd/sd-bus.h>
 #include <systemd/sd-event.h>
 
-#define LINE_BUF_SIZE 512
-#define MAX_NAME_SIZE 256
-#define MAX_GROUPS 10
-
-/* file parser results */
-
-struct line_data {
-    char buf[LINE_BUF_SIZE];
-    char *id;
-    int n_groups;
-    char *groups[MAX_GROUPS];
-};
-
-/* D-Bus message analysis */
-
-enum subject_kind {
-    SUBJECT_KIND_UNKNOWN = 0,
-    SUBJECT_KIND_UNIX_PROCESS,
-    SUBJECT_KIND_UNIX_SESSION,
-    SUBJECT_KIND_SYSTEM_BUS_NAME,
-};
-
-struct subject_unix_session {
-    char session_id[MAX_NAME_SIZE];
-};
-
-struct subject_unix_process {
-    uint32_t pid;
-    uint64_t start_time;
-};
-
-struct subject_system_bus {
-    char system_bus_name[MAX_NAME_SIZE];
-};
-
-struct subject {
-    enum subject_kind kind;
-    union {
-        struct subject_unix_session s;
-        struct subject_unix_process p;
-        struct subject_system_bus b;
-    } data;
-};
+#include "groupcheck.h"
 
 #define STAT_NAME_SIZE 32
 #define STAT_DATA_SIZE 256
@@ -659,6 +617,34 @@ static const sd_bus_vtable polkit_vtable[] = {
     SD_BUS_VTABLE_END
 };
 
+int initialize_bus(sd_bus **bus, sd_bus_slot **slot, struct line_data *data)
+{
+    int r;
+
+    r = sd_bus_open_system(bus);
+    if (r < 0) {
+        fprintf(stderr, "Error connecting to bus: %s\n", strerror(-r));
+        goto end;
+    }
+
+    r = sd_bus_add_object_vtable(*bus, slot,
+            "/org/freedesktop/PolicyKit1/Authority",
+            "org.freedesktop.PolicyKit1.Authority", polkit_vtable, data);
+    if (r < 0) {
+        fprintf(stderr, "Error creating D-Bus object: %s\n", strerror(-r));
+        goto end;
+    }
+
+    r = sd_bus_request_name(*bus, "org.freedesktop.PolicyKit1", 0);
+    if (r < 0) {
+        fprintf(stderr, "Error requesting service name: %s\n", strerror(-r));
+        goto end;
+    }
+
+end:
+    return r;
+}
+
 static int parse_line(struct line_data *data)
 {
     char *p;
@@ -722,7 +708,7 @@ static int parse_line(struct line_data *data)
     return -EINVAL;
 }
 
-static struct line_data * load_file(const char *filename)
+struct line_data * load_file(const char *filename)
 {
     FILE *f;
     char buf[LINE_BUF_SIZE];
@@ -786,7 +772,7 @@ static struct line_data * load_file(const char *filename)
     return data;
 }
 
-static const char *find_policy_file()
+const char *find_policy_file()
 {
     struct stat s;
     const char *dynamic_conf = "/etc/groupcheck.policy";
@@ -798,78 +784,4 @@ static const char *find_policy_file()
         return default_conf;
 
     return NULL;
-}
-
-int main(int argc, char *argv[])
-{
-    sd_event *e = NULL;
-    sd_bus *bus = NULL;
-    sd_bus_slot *slot = NULL;
-    struct line_data *data = NULL;
-    int r = -1;
-    const char *policy_file;
-
-    policy_file = find_policy_file();
-    if (!policy_file) {
-        fprintf(stderr, "Error finding policy data file.\n");
-        goto end;
-    }
-
-    data = load_file(policy_file);
-    if (!data) {
-        fprintf(stderr, "Error loading policy data.\n");
-        goto end;
-    }
-
-    r = sd_event_default(&e);
-    if (r < 0) {
-        fprintf(stderr, "Error initializing default event: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_bus_open_system(&bus);
-    if (r < 0) {
-        fprintf(stderr, "Error connecting to bus: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_bus_add_object_vtable(bus, &slot,
-            "/org/freedesktop/PolicyKit1/Authority",
-            "org.freedesktop.PolicyKit1.Authority", polkit_vtable, data);
-    if (r < 0) {
-        fprintf(stderr, "Error creating D-Bus object: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_bus_request_name(bus, "org.freedesktop.PolicyKit1", 0);
-    if (r < 0) {
-        fprintf(stderr, "Error requesting service name: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_bus_attach_event(bus, e, 0);
-    if (r < 0) {
-        fprintf(stderr, "Error attaching bus to event loop: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_event_loop(e);
-    if (r < 0) {
-        fprintf(stderr, "Exited from event loop with error: %s\n", strerror(-r));
-    }
-
-end:
-    sd_bus_slot_unref(slot);
-    sd_bus_unref(bus);
-    sd_event_unref(e);
-
-    free(data);
-
-    fprintf(stdout, "Exiting daemon.\n");
-
-    if (r < 0) {
-        return EXIT_FAILURE;
-    }
-
-    return EXIT_SUCCESS;
 }
