@@ -82,7 +82,7 @@ static int verify_start_time(struct subject *subject)
     return 0;
 }
 
-static bool check_allowed(sd_bus *bus, struct line_data *data,
+bool check_allowed(sd_bus *bus, struct line_data *data,
         struct subject *subject, const char *action_id)
 {
     struct line_data *line;
@@ -370,7 +370,7 @@ static int parse_subject(sd_bus_message *m, struct subject *subject)
     return 0;
 }
 
-static void print_decision(struct subject *subject, const char *action_id, bool allowed)
+void print_decision(struct subject *subject, const char *action_id, bool allowed)
 {
     if (subject == NULL || action_id == NULL)
         return;

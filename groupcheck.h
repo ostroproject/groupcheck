@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <systemd/sd-bus.h>
 
 #define LINE_BUF_SIZE 512
@@ -60,6 +61,16 @@ struct subject {
     } data;
 };
 
-const char *find_policy_file();
-struct line_data * load_file(const char *filename);
+/* Initialize D-Bus server. "bus" and "slot" parameters are output
+ * parameters, "data" is an input parameter. */
 int initialize_bus(sd_bus **bus, sd_bus_slot **slot, struct line_data *data);
+
+/* Return the policy file path from the search paths. */
+const char *find_policy_file();
+
+/* Load a policy file. The resulting struct must be freed by the caller. */
+struct line_data * load_file(const char *filename);
+
+/* Exported for test programs. */
+void print_decision(struct subject *subject, const char *action_id, bool allowed);
+bool check_allowed(sd_bus *bus, struct line_data *data, struct subject *subject, const char *action_id);
