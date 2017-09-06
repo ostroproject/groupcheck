@@ -48,11 +48,14 @@ Using groupcheck
 
 Groupcheck doesn't take any command line parameters. The mapping between
 action ids (which action is requested by a service in the system) and
-the policy (who is allowed to do the action) is done in a
-configuration file. The first path searched for configuration is
-`/etc/groupcheck.policy` and the fallback configuration path is at
-`/usr/share/defaults/etc/groupcheck.policy`. Policies are read from only
-one file.
+the policy (who is allowed to do the action) is done in configuration
+files.
+
+Configuration files can either be loaded as simple files (using
+`-f configuration_file` command line parameter) or as a directory
+containing configuration files (using `-d configuration_directory`
+command line parameter. At least one file or directory must be
+specified on the command line.
 
 Policy files look like this:
 
@@ -84,9 +87,3 @@ service to perform an action and then dies, the answer from groupcheck based on
 the PID is no longer valid, because the PID can now belong to completely
 different process. The same concept applies also to things like D-Bus connection
 IDs.
-
-Improvement ideas
------------------
-
-* Make policy files to be read from a `.d` directory, allowing services
-  to drop in their own policy files.

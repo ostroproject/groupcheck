@@ -18,6 +18,8 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <grp.h>
+#include <dirent.h>
+#include <limits.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -82,13 +84,12 @@ static int verify_start_time(struct subject *subject)
     return 0;
 }
 
-bool check_allowed(sd_bus *bus, struct line_data *data,
+bool check_allowed(sd_bus *bus, struct conf_data *conf_data,
         struct subject *subject, const char *action_id)
 {
-    struct line_data *line;
     char **groups = NULL;
     int n_groups = 0;
-    int r;
+    int r, i;
     sd_bus_creds *creds = NULL;
     gid_t primary_gid;
     uint64_t mask = SD_BUS_CREDS_SUPPLEMENTARY_GIDS | SD_BUS_CREDS_AUGMENT
@@ -99,15 +100,12 @@ bool check_allowed(sd_bus *bus, struct line_data *data,
 
     /* find first the corresponding group data from the policy */
 
-    line = data;
-
-    while (line->id) {
-        if (strcmp(line->id, action_id) == 0) {
-            groups = line->groups;
-            n_groups = line->n_groups;
+    for (i = 0; i < conf_data->n_lines; i++) {
+        if (strcmp(conf_data->lines[i].id, action_id) == 0) {
+            groups = conf_data->lines[i].groups;
+            n_groups = conf_data->lines[i].n_groups;
             break;
         }
-        line++;
     }
 
     if (!groups)
@@ -167,6 +165,11 @@ bool check_allowed(sd_bus *bus, struct line_data *data,
         break;
 
     case SUBJECT_KIND_SYSTEM_BUS_NAME:
+        if (bus == NULL) {
+            r = -EINVAL;
+            goto end;
+        }
+
         r = sd_bus_get_name_creds(bus, subject->data.b.system_bus_name, mask, &creds);
         if (r < 0)
             goto end;
@@ -402,7 +405,7 @@ static int method_check_authorization(sd_bus_message *m, void *userdata, sd_bus_
     struct subject subject = { 0 };
     sd_bus_message *reply = NULL;
     bool allowed;
-    struct line_data *data = userdata;
+    struct conf_data *conf_data = userdata;
 
     /*
         ‣ Type=method_call  Endian=l  Flags=0  Version=1  Priority=0 Cookie=2860
@@ -479,7 +482,7 @@ static int method_check_authorization(sd_bus_message *m, void *userdata, sd_bus_
 
     /* make decision about whether the request should be allowed or not */
 
-    allowed = check_allowed(sd_bus_message_get_bus(m), data, &subject, action_id);
+    allowed = check_allowed(sd_bus_message_get_bus(m), conf_data, &subject, action_id);
 
     print_decision(&subject, action_id, allowed);
 
@@ -617,7 +620,7 @@ static const sd_bus_vtable polkit_vtable[] = {
     SD_BUS_VTABLE_END
 };
 
-int initialize_bus(sd_bus **bus, sd_bus_slot **slot, struct line_data *data)
+int initialize_bus(sd_bus **bus, sd_bus_slot **slot, struct conf_data *data)
 {
     int r;
 
@@ -645,23 +648,23 @@ end:
     return r;
 }
 
-static int parse_line(struct line_data *data)
+static int parse_line(char *buf, struct line_data *data)
 {
-    char *p;
+    char *p, *token_start, *token_end;
     bool has_equals = false;
     bool group_begins = true;
 
     memset(data->groups, 0, MAX_GROUPS*sizeof(char *));
     data->n_groups = 0;
 
-    /* data->buf has already been initialized with the raw data */
+    /* buf has already been initialized with the raw data */
 
-    p = data->id = data->buf;
+    p = token_start = buf;
 
-    while (*p && p != data->buf + sizeof(data->buf)) {
+    while (*p && p != buf + LINE_BUF_SIZE) {
         if (*p == '=') {
             has_equals = true;
-            *p = '\0';
+            token_end = p;
             p++;
             break;
         }
@@ -673,32 +676,38 @@ static int parse_line(struct line_data *data)
         return -EINVAL;
     }
 
+    data->id = strndup(token_start, token_end-token_start);
+
     if (*p != '"') {
         fprintf(stderr, "Error parsing configuration file.\n");
         return -EINVAL;
     }
 
-    if (p != data->buf + sizeof(data->buf))
+    if (p != buf + LINE_BUF_SIZE)
         p++;
 
-    while (*p && p != data->buf + sizeof(data->buf)) {
+    token_start = p;
+
+    while (*p && p != buf + LINE_BUF_SIZE) {
         if (group_begins) {
             if (data->n_groups >= MAX_GROUPS) {
                 fprintf(stderr, "Error: too many groups defined.\n");
                 return -EINVAL;
             }
-            data->groups[data->n_groups++] = p;
+            token_start = p;
             group_begins = false;
             continue;
         }
 
         if (*p == ',') {
             group_begins = true;
-            *p = '\0';
+            token_end = p;
+            data->groups[data->n_groups++] = strndup(token_start, token_end-token_start);
         }
         else if (*p == '"') {
             /* done parsing the line */
-            *p = '\0';
+            token_end = p;
+            data->groups[data->n_groups++] = strndup(token_start, token_end-token_start);
             return 0;
         }
         p++;
@@ -708,18 +717,46 @@ static int parse_line(struct line_data *data)
     return -EINVAL;
 }
 
-struct line_data * load_file(const char *filename)
+static int add_to_conf(struct conf_data *conf_data, struct line_data *line_data, int n_lines)
+{
+    int total_lines;
+
+    if (conf_data == NULL || line_data == NULL)
+        return -EINVAL;
+
+    /* do not overflow */
+    if (n_lines > (INT_MAX - conf_data->n_lines))
+        return -EFBIG;
+
+    total_lines = n_lines + conf_data->n_lines;
+
+    conf_data->lines = realloc(conf_data->lines,
+            sizeof(struct line_data)*total_lines);
+
+    memcpy(&conf_data->lines[conf_data->n_lines], line_data,
+            sizeof(struct line_data)*n_lines);
+    conf_data->n_lines = total_lines;
+
+    return 0;
+}
+
+int load_file(struct conf_data *conf_data, const char *filename)
 {
     FILE *f;
     char buf[LINE_BUF_SIZE];
     int n_lines = 0;
-    int r, i;
+    int r = 0;
+
     struct line_data *data = NULL;
+    int line_data_buf = 8;
+
+    if (conf_data == NULL)
+        return -EINVAL;
 
     f = fopen(filename, "r");
 
     if (f == NULL)
-        return NULL;
+        return -EINVAL;
 
     /* The configuration file must be of following format. No whitespaces
      * are allowed except for newlines. First part of the line is the action-id.
@@ -732,6 +769,8 @@ struct line_data * load_file(const char *filename)
        org.freedesktop.login1.reboot="adm"
 
      */
+
+    data = calloc(line_data_buf, sizeof(struct line_data));
 
     /* allocate memory for storing the data */
     while (fgets(buf, sizeof(buf), f)) {
@@ -748,28 +787,58 @@ struct line_data * load_file(const char *filename)
             continue;
         }
 
-        data = realloc(data, sizeof(struct line_data)*(n_lines+1));
-        memcpy(data[n_lines].buf, buf, LINE_BUF_SIZE);
-        n_lines++;
-    }
+        if (n_lines == line_data_buf) {
+            line_data_buf *= 2;
+            data = realloc(data, sizeof(struct line_data)*line_data_buf);
+        }
 
-    /* allocate one more line item to be a sentinel and zero it */
-    data = realloc(data, sizeof(struct line_data)*(n_lines+1));
-    memset(&data[n_lines], 0, sizeof(struct line_data));
-
-    /* parse the lines */
-    for (i = 0; i < n_lines; i++) {
-        r = parse_line(&data[i]);
+        r = parse_line(buf, &data[n_lines]);
         if (r < 0) {
-            fclose(f);
-            free(data);
-            return NULL;
+            goto end;
+        }
+
+        n_lines++;
+
+        if (n_lines == INT_MAX) {
+            r = -EFBIG;
+            goto end;
         }
     }
 
-    fclose(f);
+    r = add_to_conf(conf_data, data, n_lines);
 
-    return data;
+end:
+    fclose(f);
+    /* data was copied */
+    free(data);
+    return r;
+}
+
+int load_directory(struct conf_data *conf_data, const char *dirname)
+{
+    DIR *dir;
+    struct dirent *ent;
+    char filename[PATH_MAX];
+    int r = 0;
+
+    if (conf_data == NULL)
+        return -1;
+
+    dir = opendir(dirname);
+
+    if (dir == NULL)
+        return -1;
+
+    while ((ent = readdir(dir))) {
+        snprintf(filename, sizeof(filename), "%s/%s", dirname, ent->d_name);
+        r = load_file(conf_data, filename);
+        if (r < 0)
+            goto end;
+    }
+
+end:
+    closedir(dir);
+    return r;
 }
 
 const char *find_policy_file()

@@ -24,10 +24,14 @@
 /* file parser results */
 
 struct line_data {
-    char buf[LINE_BUF_SIZE];
     char *id;
     int n_groups;
     char *groups[MAX_GROUPS];
+};
+
+struct conf_data {
+    struct line_data *lines;
+    int n_lines;
 };
 
 /* D-Bus message analysis */
@@ -44,8 +48,8 @@ struct subject_unix_session {
 };
 
 struct subject_unix_process {
-    uint32_t pid;
     uint64_t start_time;
+    uint32_t pid;
 };
 
 struct subject_system_bus {
@@ -63,14 +67,15 @@ struct subject {
 
 /* Initialize D-Bus server. "bus" and "slot" parameters are output
  * parameters, "data" is an input parameter. */
-int initialize_bus(sd_bus **bus, sd_bus_slot **slot, struct line_data *data);
+int initialize_bus(sd_bus **bus, sd_bus_slot **slot, struct conf_data *data);
 
 /* Return the policy file path from the search paths. */
 const char *find_policy_file();
 
 /* Load a policy file. The resulting struct must be freed by the caller. */
-struct line_data * load_file(const char *filename);
+int load_file(struct conf_data *conf_data, const char *filename);
+int load_directory(struct conf_data *conf_data, const char *filename);
 
 /* Exported for test programs. */
 void print_decision(struct subject *subject, const char *action_id, bool allowed);
-bool check_allowed(sd_bus *bus, struct line_data *data, struct subject *subject, const char *action_id);
+bool check_allowed(sd_bus *bus, struct conf_data *conf_data, struct subject *subject, const char *action_id);
