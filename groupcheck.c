@@ -18,55 +18,15 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <grp.h>
+#include <dirent.h>
+#include <limits.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
 #include <systemd/sd-bus.h>
 #include <systemd/sd-event.h>
 
-#define LINE_BUF_SIZE 512
-#define MAX_NAME_SIZE 256
-#define MAX_GROUPS 10
-
-/* file parser results */
-
-struct line_data {
-    char buf[LINE_BUF_SIZE];
-    char *id;
-    int n_groups;
-    char *groups[MAX_GROUPS];
-};
-
-/* D-Bus message analysis */
-
-enum subject_kind {
-    SUBJECT_KIND_UNKNOWN = 0,
-    SUBJECT_KIND_UNIX_PROCESS,
-    SUBJECT_KIND_UNIX_SESSION,
-    SUBJECT_KIND_SYSTEM_BUS_NAME,
-};
-
-struct subject_unix_session {
-    char session_id[MAX_NAME_SIZE];
-};
-
-struct subject_unix_process {
-    uint32_t pid;
-    uint64_t start_time;
-};
-
-struct subject_system_bus {
-    char system_bus_name[MAX_NAME_SIZE];
-};
-
-struct subject {
-    enum subject_kind kind;
-    union {
-        struct subject_unix_session s;
-        struct subject_unix_process p;
-        struct subject_system_bus b;
-    } data;
-};
+#include "groupcheck.h"
 
 #define STAT_NAME_SIZE 32
 #define STAT_DATA_SIZE 256
@@ -124,32 +84,28 @@ static int verify_start_time(struct subject *subject)
     return 0;
 }
 
-static bool check_allowed(sd_bus *bus, struct line_data *data,
+bool check_allowed(sd_bus *bus, struct conf_data *conf_data,
         struct subject *subject, const char *action_id)
 {
-    struct line_data *line;
     char **groups = NULL;
     int n_groups = 0;
-    int r;
+    int r, i;
     sd_bus_creds *creds = NULL;
     gid_t primary_gid;
     uint64_t mask = SD_BUS_CREDS_SUPPLEMENTARY_GIDS | SD_BUS_CREDS_AUGMENT
             | SD_BUS_CREDS_PID | SD_BUS_CREDS_GID | SD_BUS_CREDS_UID;
     const gid_t *gids = NULL;
     int n_gids = 0;
-    pid_t ruid, euid;
+    uid_t ruid, euid;
 
     /* find first the corresponding group data from the policy */
 
-    line = data;
-
-    while (line->id) {
-        if (strcmp(line->id, action_id) == 0) {
-            groups = line->groups;
-            n_groups = line->n_groups;
+    for (i = 0; i < conf_data->n_lines; i++) {
+        if (strcmp(conf_data->lines[i].id, action_id) == 0) {
+            groups = conf_data->lines[i].groups;
+            n_groups = conf_data->lines[i].n_groups;
             break;
         }
-        line++;
     }
 
     if (!groups)
@@ -209,6 +165,11 @@ static bool check_allowed(sd_bus *bus, struct line_data *data,
         break;
 
     case SUBJECT_KIND_SYSTEM_BUS_NAME:
+        if (bus == NULL) {
+            r = -EINVAL;
+            goto end;
+        }
+
         r = sd_bus_get_name_creds(bus, subject->data.b.system_bus_name, mask, &creds);
         if (r < 0)
             goto end;
@@ -412,7 +373,7 @@ static int parse_subject(sd_bus_message *m, struct subject *subject)
     return 0;
 }
 
-static void print_decision(struct subject *subject, const char *action_id, bool allowed)
+void print_decision(struct subject *subject, const char *action_id, bool allowed)
 {
     if (subject == NULL || action_id == NULL)
         return;
@@ -444,7 +405,7 @@ static int method_check_authorization(sd_bus_message *m, void *userdata, sd_bus_
     struct subject subject = { 0 };
     sd_bus_message *reply = NULL;
     bool allowed;
-    struct line_data *data = userdata;
+    struct conf_data *conf_data = userdata;
 
     /*
         ‣ Type=method_call  Endian=l  Flags=0  Version=1  Priority=0 Cookie=2860
@@ -521,7 +482,7 @@ static int method_check_authorization(sd_bus_message *m, void *userdata, sd_bus_
 
     /* make decision about whether the request should be allowed or not */
 
-    allowed = check_allowed(sd_bus_message_get_bus(m), data, &subject, action_id);
+    allowed = check_allowed(sd_bus_message_get_bus(m), conf_data, &subject, action_id);
 
     print_decision(&subject, action_id, allowed);
 
@@ -644,7 +605,7 @@ static int property_backend_features(sd_bus *bus, const char *path,
         const char *interface, const char *property, sd_bus_message *reply,
         void *userdata, sd_bus_error *error)
 {
-    /* we don't support temprorary authorizations */
+    /* we don't support temporary authorizations */
     return sd_bus_message_append(reply, "u", 0);
 }
 
@@ -659,23 +620,51 @@ static const sd_bus_vtable polkit_vtable[] = {
     SD_BUS_VTABLE_END
 };
 
-static int parse_line(struct line_data *data)
+int initialize_bus(sd_bus **bus, sd_bus_slot **slot, struct conf_data *data)
 {
-    char *p;
+    int r;
+
+    r = sd_bus_open_system(bus);
+    if (r < 0) {
+        fprintf(stderr, "Error connecting to bus: %s\n", strerror(-r));
+        goto end;
+    }
+
+    r = sd_bus_add_object_vtable(*bus, slot,
+            "/org/freedesktop/PolicyKit1/Authority",
+            "org.freedesktop.PolicyKit1.Authority", polkit_vtable, data);
+    if (r < 0) {
+        fprintf(stderr, "Error creating D-Bus object: %s\n", strerror(-r));
+        goto end;
+    }
+
+    r = sd_bus_request_name(*bus, "org.freedesktop.PolicyKit1", 0);
+    if (r < 0) {
+        fprintf(stderr, "Error requesting service name: %s\n", strerror(-r));
+        goto end;
+    }
+
+end:
+    return r;
+}
+
+static int parse_line(char *buf, struct line_data *data)
+{
+    char *p, *token_start, *token_end;
     bool has_equals = false;
     bool group_begins = true;
 
     memset(data->groups, 0, MAX_GROUPS*sizeof(char *));
     data->n_groups = 0;
 
-    /* data->buf has already been initialized with the raw data */
+    /* buf has already been initialized with the raw data */
 
-    p = data->id = data->buf;
+    p = token_start = buf;
 
-    while (*p && p != data->buf + sizeof(data->buf)) {
+    while (*p && p != buf + LINE_BUF_SIZE) {
         if (*p == '=') {
             has_equals = true;
-            *p = '\0';
+            token_end = p;
             p++;
             break;
         }
@@ -687,32 +676,38 @@ static int parse_line(struct line_data *data)
         return -EINVAL;
     }
 
+    data->id = strndup(token_start, token_end-token_start);
+
     if (*p != '"') {
         fprintf(stderr, "Error parsing configuration file.\n");
         return -EINVAL;
     }
 
-    if (p != data->buf + sizeof(data->buf))
+    if (p != buf + LINE_BUF_SIZE)
         p++;
 
-    while (*p && p != data->buf + sizeof(data->buf)) {
+    token_start = p;
+
+    while (*p && p != buf + LINE_BUF_SIZE) {
         if (group_begins) {
             if (data->n_groups >= MAX_GROUPS) {
                 fprintf(stderr, "Error: too many groups defined.\n");
                 return -EINVAL;
             }
-            data->groups[data->n_groups++] = p;
+            token_start = p;
             group_begins = false;
             continue;
         }
 
         if (*p == ',') {
             group_begins = true;
-            *p = '\0';
+            token_end = p;
+            data->groups[data->n_groups++] = strndup(token_start, token_end-token_start);
         }
         else if (*p == '"') {
             /* done parsing the line */
-            *p = '\0';
+            token_end = p;
+            data->groups[data->n_groups++] = strndup(token_start, token_end-token_start);
             return 0;
         }
         p++;
@@ -722,18 +717,46 @@ static int parse_line(struct line_data *data)
     return -EINVAL;
 }
 
-static struct line_data * load_file(const char *filename)
+static int add_to_conf(struct conf_data *conf_data, struct line_data *line_data, int n_lines)
+{
+    int total_lines;
+
+    if (conf_data == NULL || line_data == NULL)
+        return -EINVAL;
+
+    /* do not overflow */
+    if (n_lines > (INT_MAX - conf_data->n_lines))
+        return -EFBIG;
+
+    total_lines = n_lines + conf_data->n_lines;
+
+    conf_data->lines = realloc(conf_data->lines,
+            sizeof(struct line_data)*total_lines);
+
+    memcpy(&conf_data->lines[conf_data->n_lines], line_data,
+            sizeof(struct line_data)*n_lines);
+    conf_data->n_lines = total_lines;
+
+    return 0;
+}
+
+int load_file(struct conf_data *conf_data, const char *filename)
 {
     FILE *f;
     char buf[LINE_BUF_SIZE];
     int n_lines = 0;
-    int r, i;
+    int r = 0;
+
     struct line_data *data = NULL;
+    int line_data_buf = 8;
+
+    if (conf_data == NULL)
+        return -EINVAL;
 
     f = fopen(filename, "r");
 
     if (f == NULL)
-        return NULL;
+        return -EINVAL;
 
     /* The configuration file must be of following format. No whitespaces
      * are allowed except for newlines. First part of the line is the action-id.
@@ -746,6 +769,8 @@ static struct line_data * load_file(const char *filename)
        org.freedesktop.login1.reboot="adm"
 
      */
+
+    data = calloc(line_data_buf, sizeof(struct line_data));
 
     /* allocate memory for storing the data */
     while (fgets(buf, sizeof(buf), f)) {
@@ -762,31 +787,61 @@ static struct line_data * load_file(const char *filename)
             continue;
         }
 
-        data = realloc(data, sizeof(struct line_data)*(n_lines+1));
-        memcpy(data[n_lines].buf, buf, LINE_BUF_SIZE);
-        n_lines++;
-    }
+        if (n_lines == line_data_buf) {
+            line_data_buf *= 2;
+            data = realloc(data, sizeof(struct line_data)*line_data_buf);
+        }
 
-    /* allocate one more line item to be a sentinel and zero it */
-    data = realloc(data, sizeof(struct line_data)*(n_lines+1));
-    memset(&data[n_lines], 0, sizeof(struct line_data));
-
-    /* parse the lines */
-    for (i = 0; i < n_lines; i++) {
-        r = parse_line(&data[i]);
+        r = parse_line(buf, &data[n_lines]);
         if (r < 0) {
-            fclose(f);
-            free(data);
-            return NULL;
+            goto end;
+        }
+
+        n_lines++;
+
+        if (n_lines == INT_MAX) {
+            r = -EFBIG;
+            goto end;
         }
     }
 
-    fclose(f);
+    r = add_to_conf(conf_data, data, n_lines);
 
-    return data;
+end:
+    fclose(f);
+    /* data was copied */
+    free(data);
+    return r;
 }
 
-static const char *find_policy_file()
+int load_directory(struct conf_data *conf_data, const char *dirname)
+{
+    DIR *dir;
+    struct dirent *ent;
+    char filename[PATH_MAX];
+    int r = 0;
+
+    if (conf_data == NULL)
+        return -1;
+
+    dir = opendir(dirname);
+
+    if (dir == NULL)
+        return -1;
+
+    while ((ent = readdir(dir))) {
+        snprintf(filename, sizeof(filename), "%s/%s", dirname, ent->d_name);
+        r = load_file(conf_data, filename);
+        if (r < 0)
+            goto end;
+    }
+
+end:
+    closedir(dir);
+    return r;
+}
+
+const char *find_policy_file()
 {
     struct stat s;
     const char *dynamic_conf = "/etc/groupcheck.policy";
@@ -798,78 +853,4 @@ static const char *find_policy_file()
         return default_conf;
 
     return NULL;
-}
-
-int main(int argc, char *argv[])
-{
-    sd_event *e = NULL;
-    sd_bus *bus = NULL;
-    sd_bus_slot *slot = NULL;
-    struct line_data *data = NULL;
-    int r = -1;
-    const char *policy_file;
-
-    policy_file = find_policy_file();
-    if (!policy_file) {
-        fprintf(stderr, "Error finding policy data file.\n");
-        goto end;
-    }
-
-    data = load_file(policy_file);
-    if (!data) {
-        fprintf(stderr, "Error loading policy data.\n");
-        goto end;
-    }
-
-    r = sd_event_default(&e);
-    if (r < 0) {
-        fprintf(stderr, "Error initializing default event: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_bus_open_system(&bus);
-    if (r < 0) {
-        fprintf(stderr, "Error connecting to bus: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_bus_add_object_vtable(bus, &slot,
-            "/org/freedesktop/PolicyKit1/Authority",
-            "org.freedesktop.PolicyKit1.Authority", polkit_vtable, data);
-    if (r < 0) {
-        fprintf(stderr, "Error creating D-Bus object: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_bus_request_name(bus, "org.freedesktop.PolicyKit1", 0);
-    if (r < 0) {
-        fprintf(stderr, "Error requesting service name: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_bus_attach_event(bus, e, 0);
-    if (r < 0) {
-        fprintf(stderr, "Error attaching bus to event loop: %s\n", strerror(-r));
-        goto end;
-    }
-
-    r = sd_event_loop(e);
-    if (r < 0) {
-        fprintf(stderr, "Exited from event loop with error: %s\n", strerror(-r));
-    }
-
-end:
-    sd_bus_slot_unref(slot);
-    sd_bus_unref(bus);
-    sd_event_unref(e);
-
-    free(data);
-
-    fprintf(stdout, "Exiting daemon.\n");
-
-    if (r < 0) {
-        return EXIT_FAILURE;
-    }
-
-    return EXIT_SUCCESS;
 }

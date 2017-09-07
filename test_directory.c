@@ -18,41 +18,45 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <systemd/sd-bus.h>
-#include <systemd/sd-event.h>
-
 #include "groupcheck.h"
 
 int main(int argc, char *argv[])
 {
     int r = -1, i, j;
-    const char *policy_file;
-    const char *action_id;
+    const char *policy_directory;
     struct conf_data conf_data = { 0 };
-    struct subject subject;
-    bool allowed;
 
-    if (argc != 3) {
-        fprintf(stderr, "Usage:\n\ttest_groups <policyfile> <action_id>\n");
+    if (argc != 2) {
+        fprintf(stderr, "Usage:\n\ttest_directory <policydir>\n");
         return EXIT_FAILURE;
     }
 
-    policy_file = argv[1];
-    action_id = argv[2];
+    policy_directory = argv[1];
 
-    r = load_file(&conf_data, policy_file);
+    r = load_directory(&conf_data, policy_directory);
     if (r < 0) {
         fprintf(stderr, "Error loading policy data.\n");
         goto end;
     }
 
-    subject.kind = SUBJECT_KIND_UNIX_PROCESS;
-    subject.data.p.pid = getpid();
-    subject.data.p.start_time = 0;
+    if (conf_data.n_lines != 2) {
+        fprintf(stderr, "Expected two config lines (had %i).\n", conf_data.n_lines);
+        goto end;
+    }
 
-    allowed = check_allowed(NULL, &conf_data, &subject, action_id);
-    print_decision(&subject, action_id, allowed);
+    printf("First line : id: %s\n", conf_data.lines[0].id);
+    printf("           : groups: ");
+    for (i = 0; i < conf_data.lines[0].n_groups; i++) {
+        printf("%s ", conf_data.lines[0].groups[i]);
+    }
+    printf("\n");
 
+    printf("Second line: id: %s\n", conf_data.lines[1].id);
+    printf("           : groups: ");
+    for (i = 0; i < conf_data.lines[1].n_groups; i++) {
+        printf("%s ", conf_data.lines[1].groups[i]);
+    }
+    printf("\n");
 end:
     for (i = 0; i < conf_data.n_lines; i++) {
         for (j = 0; j < conf_data.lines[i].n_groups; j++) {
