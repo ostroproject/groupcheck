@@ -165,10 +165,8 @@ bool check_allowed(sd_bus *bus, struct conf_data *conf_data,
         break;
 
     case SUBJECT_KIND_SYSTEM_BUS_NAME:
-        if (bus == NULL) {
-            r = -EINVAL;
+        if (bus == NULL)
             goto end;
-        }
 
         r = sd_bus_get_name_creds(bus, subject->data.b.system_bus_name, mask, &creds);
         if (r < 0)
@@ -839,18 +837,4 @@ int load_directory(struct conf_data *conf_data, const char *dirname)
 end:
     closedir(dir);
     return r;
-}
-
-const char *find_policy_file()
-{
-    struct stat s;
-    const char *dynamic_conf = "/etc/groupcheck.policy";
-    const char *default_conf = "/usr/share/defaults/etc/groupcheck.policy";
-
-    if (stat(dynamic_conf, &s) == 0)
-        return dynamic_conf;
-    else if (stat(default_conf, &s) == 0)
-        return default_conf;
-
-    return NULL;
 }

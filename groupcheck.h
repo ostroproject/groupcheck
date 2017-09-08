@@ -69,9 +69,6 @@ struct subject {
  * parameters, "data" is an input parameter. */
 int initialize_bus(sd_bus **bus, sd_bus_slot **slot, struct conf_data *data);
 
-/* Return the policy file path from the search paths. */
-const char *find_policy_file();
-
 /* Load a policy file. The resulting struct must be freed by the caller. */
 int load_file(struct conf_data *conf_data, const char *filename);
 int load_directory(struct conf_data *conf_data, const char *filename);
