@@ -45,6 +45,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Error loading policy data.\n");
         goto end;
     }
+    print_config(&conf_data);
 
     subject.kind = SUBJECT_KIND_UNIX_PROCESS;
     subject.data.p.pid = getpid();

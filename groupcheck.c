@@ -214,7 +214,7 @@ bool check_allowed(sd_bus *bus, struct conf_data *conf_data,
                 if (gids[j] == primary_gid) {
                     /* We only include supplementary gids in the check, not the
                        primary gid. This is to make it more difficult for
-                       processes to exec a setgid process to gain elevated
+                       processes to exec a setgid binary to gain elevated
                        group access. */
                        continue;
                 }
@@ -391,6 +391,22 @@ void print_decision(struct subject *subject, const char *action_id, bool allowed
         break;
     default:
         break;
+    }
+}
+
+void print_config(struct conf_data *conf_data)
+{
+    int i, j;
+
+    if (conf_data == NULL)
+        return;
+
+    for (i = 0; i < conf_data->n_lines; i++) {
+        fprintf(stdout, "id: %s, groups: ", conf_data->lines[i].id);
+        for (j = 0; j < conf_data->lines[i].n_groups; j++) {
+            fprintf(stdout, "%s ", conf_data->lines[i].groups[j]);
+        }
+        fprintf(stdout, "\n");
     }
 }
 
