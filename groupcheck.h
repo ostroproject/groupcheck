@@ -74,6 +74,7 @@ int load_file(struct conf_data *conf_data, const char *filename);
 int load_directory(struct conf_data *conf_data, const char *filename);
 
 /* Exported for test programs. */
+int get_start_time(pid_t pid, uint64_t *start);
 void print_decision(struct subject *subject, const char *action_id, bool allowed);
 void print_config(struct conf_data *conf_data);
 bool check_allowed(sd_bus *bus, struct conf_data *conf_data, struct subject *subject, const char *action_id);

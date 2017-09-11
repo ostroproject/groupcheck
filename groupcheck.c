@@ -31,10 +31,9 @@
 #define STAT_NAME_SIZE 32
 #define STAT_DATA_SIZE 256
 
-static int verify_start_time(struct subject *subject)
+int get_start_time(pid_t pid, uint64_t *start)
 {
-    /* Get the pid start time from /proc/stat and compare it with the value in
-     * the request. Return -1 if no match. */
+    /* Get the pid start time from /proc/stat. */
 
     char namebuf[STAT_NAME_SIZE];
     char databuf[STAT_DATA_SIZE];
@@ -44,7 +43,7 @@ static int verify_start_time(struct subject *subject)
     int i;
     uint64_t start_time;
 
-    r = snprintf(namebuf, STAT_NAME_SIZE, "/proc/%d/stat", subject->data.p.pid);
+    r = snprintf(namebuf, STAT_NAME_SIZE, "/proc/%d/stat", pid);
     if (r < 0 || r >= STAT_NAME_SIZE)
         return -EINVAL;
 
@@ -64,6 +63,7 @@ static int verify_start_time(struct subject *subject)
 
     if (*p == '\0')
         return -EINVAL;
+    p++;
 
     /* That was the second field. Then skip over 19 more (20 spaces). */
 
@@ -71,11 +71,30 @@ static int verify_start_time(struct subject *subject)
         p = strchr(p, ' ');
         if (*p == '\0')
             return -EINVAL;
+        p++;
     }
 
     start_time = strtoul(p, &endp, 10);
-    if (endp != NULL)
+
+    if (endp == NULL || *endp != ' ')
         return -EINVAL;
+
+    *start = start_time;
+
+    return 0;
+}
+
+static int verify_start_time(struct subject *subject)
+{
+    int r;
+    uint64_t start_time = 0;
+
+    /* Compare pid start time with the value in the request. Return -1
+     * if no match. */
+
+    r = get_start_time(subject->data.p.pid, &start_time);
+    if (r < 0)
+        return r;
 
     if (start_time != subject->data.p.start_time)
         return -EINVAL;

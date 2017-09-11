@@ -49,7 +49,11 @@ int main(int argc, char *argv[])
 
     subject.kind = SUBJECT_KIND_UNIX_PROCESS;
     subject.data.p.pid = getpid();
-    subject.data.p.start_time = 0;
+    r = get_start_time(subject.data.p.pid, &subject.data.p.start_time);
+    if (r < 0) {
+        fprintf(stderr, "Error obtaining process start time.\n");
+        goto end;
+    }
 
     allowed = check_allowed(NULL, &conf_data, &subject, action_id);
     print_decision(&subject, action_id, allowed);
