@@ -32,6 +32,8 @@ int main(int argc, char *argv[])
     struct subject subject;
     bool allowed;
 
+    /* TODO: set supplementary groups to a set we want to test. */
+
     if (argc != 3) {
         fprintf(stderr, "Usage:\n\ttest_groups <policyfile> <action_id>\n");
         return EXIT_FAILURE;

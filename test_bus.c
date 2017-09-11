@@ -17,10 +17,8 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <sys/stat.h>
 
 #include <systemd/sd-bus.h>
-#include <systemd/sd-event.h>
 
 #include "groupcheck.h"
 
@@ -32,6 +30,8 @@ int main(int argc, char *argv[])
     const char *action_id;
     const char *name = NULL;
     bool *allowed;
+
+    /* TODO: set supplementary groups to a set we want to test. */
 
     if (argc != 2) {
         fprintf(stderr, "Usage:\n\ttest_bus <action_id>\n");
@@ -64,6 +64,8 @@ int main(int argc, char *argv[])
     }
 
     r = sd_bus_message_open_container(msg, SD_BUS_TYPE_STRUCT, "sa{sv}");
+    if (r < 0)
+        goto end;
 
     r = sd_bus_message_append(msg, "s", "system-bus-name");
     if (r < 0)
