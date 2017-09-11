@@ -38,7 +38,7 @@ int get_start_time(pid_t pid, uint64_t *start)
     char namebuf[STAT_NAME_SIZE];
     char databuf[STAT_DATA_SIZE];
     int r;
-    FILE *f;
+    FILE *f = NULL;
     char *p, *endp = NULL;
     int i;
     uint64_t start_time;
@@ -53,35 +53,48 @@ int get_start_time(pid_t pid, uint64_t *start)
         return -EINVAL;
 
     p = fgets(databuf, STAT_DATA_SIZE, f);
-    if (p == NULL)
-        return -EINVAL;
+    if (p == NULL) {
+        r = -EINVAL;
+        goto end;
+    }
 
     /* read the 22th field, which is the process start time in jiffies */
 
     /* skip over the "comm" field that has parentheses */
     p = strchr(p, ')');
 
-    if (*p == '\0')
-        return -EINVAL;
+    if (*p == '\0') {
+        r = -EINVAL;
+        goto end;
+    }
     p++;
 
     /* That was the second field. Then skip over 19 more (20 spaces). */
 
     for (i = 0; i < 20; i++) {
         p = strchr(p, ' ');
-        if (*p == '\0')
-            return -EINVAL;
+        if (*p == '\0') {
+            r= -EINVAL;
+            goto end;
+        }
         p++;
     }
 
     start_time = strtoul(p, &endp, 10);
 
-    if (endp == NULL || *endp != ' ')
-        return -EINVAL;
+    if (endp == NULL || *endp != ' ') {
+        r = -EINVAL;
+        goto end;
+    }
 
     *start = start_time;
+    r = 0;
 
-    return 0;
+end:
+    if (f)
+        fclose(f);
+
+    return r;
 }
 
 static int verify_start_time(struct subject *subject)
