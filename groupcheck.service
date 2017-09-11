@@ -5,7 +5,7 @@ Description=groupcheck -- minimal polkit replacement
 User=groupcheck
 Type=dbus
 BusName=org.freedesktop.PolicyKit1
-ExecStart=/usr/sbin/groupcheck
+ExecStart=/usr/sbin/groupcheck -f /etc/groupcheck/groupcheck.policy
 
 [Install]
 WantedBy=multi-user.target
