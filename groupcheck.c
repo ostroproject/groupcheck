@@ -112,7 +112,8 @@ bool check_allowed(sd_bus *bus, struct conf_data *conf_data,
     sd_bus_creds *creds = NULL;
     gid_t primary_gid;
     uint64_t mask = SD_BUS_CREDS_SUPPLEMENTARY_GIDS | SD_BUS_CREDS_AUGMENT
-            | SD_BUS_CREDS_PID | SD_BUS_CREDS_GID | SD_BUS_CREDS_UID;
+            | SD_BUS_CREDS_PID | SD_BUS_CREDS_GID | SD_BUS_CREDS_UID
+            | SD_BUS_CREDS_EUID;
     const gid_t *gids = NULL;
     int n_gids = 0;
     uid_t ruid, euid;
