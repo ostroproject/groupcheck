@@ -17,6 +17,8 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <grp.h>
+#include <errno.h>
 
 #include <systemd/sd-bus.h>
 
@@ -26,19 +28,35 @@ int main(int argc, char *argv[])
 {
     sd_bus *bus = NULL;
     sd_bus_message *msg = NULL, *reply = NULL;
-    int r = -1;
+    int r = -1, i;
     const char *action_id;
     const char *name = NULL;
     bool *allowed;
+    gid_t supplementary_groups[argc];
 
-    /* TODO: set supplementary groups to a set we want to test. */
-
-    if (argc != 2) {
-        fprintf(stderr, "Usage:\n\ttest_bus <action_id>\n");
+    if (argc < 2) {
+        fprintf(stderr, "Usage:\n\ttest_bus <action_id> [group1 group2 ...]\n");
         return EXIT_FAILURE;
     }
 
     action_id = argv[1];
+
+    if (argc > 2) {
+        for (i = 0; i < argc-2; i++) {
+            struct group *grp;
+            grp = getgrnam(argv[i+2]);
+            if (grp == NULL) {
+                fprintf(stderr, "Error: group '%s' was not found.\n", argv[i+2]);
+                goto end;
+            }
+            supplementary_groups[i] = grp->gr_gid;
+        }
+        r = setgroups(argc-2, supplementary_groups);
+        if (r < 0) {
+            fprintf(stderr, "Error setting the supplementary groups: %s\n", strerror(errno));
+            goto end;
+        }
+    }
 
     r = sd_bus_open_system(&bus);
     if (r < 0) {
