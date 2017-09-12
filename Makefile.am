@@ -3,7 +3,7 @@ groupcheck_SOURCES = groupcheck.c main.c
 groupcheck_CPPFLAGS = $(LIBSYSTEMD_CPPFLAGS)
 groupcheck_LDADD = $(LIBSYSTEMD_LIBS)
 
-noinst_PROGRAMS = test_process test_directory test_bus
+noinst_PROGRAMS = test-process test-directory test-bus
 test_process_SOURCES = groupcheck.c test_process.c
 test_process_CPPFLAGS = $(LIBSYSTEMD_CPPFLAGS)
 test_process_LDADD = $(LIBSYSTEMD_LIBS)
