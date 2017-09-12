@@ -31,20 +31,19 @@
 #define STAT_NAME_SIZE 32
 #define STAT_DATA_SIZE 256
 
-static int verify_start_time(struct subject *subject)
+int get_start_time(pid_t pid, uint64_t *start)
 {
-    /* Get the pid start time from /proc/stat and compare it with the value in
-     * the request. Return -1 if no match. */
+    /* Get the pid start time from /proc/stat. */
 
     char namebuf[STAT_NAME_SIZE];
     char databuf[STAT_DATA_SIZE];
     int r;
-    FILE *f;
+    FILE *f = NULL;
     char *p, *endp = NULL;
     int i;
     uint64_t start_time;
 
-    r = snprintf(namebuf, STAT_NAME_SIZE, "/proc/%d/stat", subject->data.p.pid);
+    r = snprintf(namebuf, STAT_NAME_SIZE, "/proc/%d/stat", pid);
     if (r < 0 || r >= STAT_NAME_SIZE)
         return -EINVAL;
 
@@ -54,28 +53,61 @@ static int verify_start_time(struct subject *subject)
         return -EINVAL;
 
     p = fgets(databuf, STAT_DATA_SIZE, f);
-    if (p == NULL)
-        return -EINVAL;
+    if (p == NULL) {
+        r = -EINVAL;
+        goto end;
+    }
 
     /* read the 22th field, which is the process start time in jiffies */
 
     /* skip over the "comm" field that has parentheses */
     p = strchr(p, ')');
 
-    if (*p == '\0')
-        return -EINVAL;
+    if (*p == '\0') {
+        r = -EINVAL;
+        goto end;
+    }
+    p++;
 
     /* That was the second field. Then skip over 19 more (20 spaces). */
 
     for (i = 0; i < 20; i++) {
         p = strchr(p, ' ');
-        if (*p == '\0')
-            return -EINVAL;
+        if (*p == '\0') {
+            r= -EINVAL;
+            goto end;
+        }
+        p++;
     }
 
     start_time = strtoul(p, &endp, 10);
-    if (endp != NULL)
-        return -EINVAL;
+
+    if (endp == NULL || *endp != ' ') {
+        r = -EINVAL;
+        goto end;
+    }
+
+    *start = start_time;
+    r = 0;
+
+end:
+    if (f)
+        fclose(f);
+
+    return r;
+}
+
+static int verify_start_time(struct subject *subject)
+{
+    int r;
+    uint64_t start_time = 0;
+
+    /* Compare pid start time with the value in the request. Return -1
+     * if no match. */
+
+    r = get_start_time(subject->data.p.pid, &start_time);
+    if (r < 0)
+        return r;
 
     if (start_time != subject->data.p.start_time)
         return -EINVAL;
@@ -93,7 +125,8 @@ bool check_allowed(sd_bus *bus, struct conf_data *conf_data,
     sd_bus_creds *creds = NULL;
     gid_t primary_gid;
     uint64_t mask = SD_BUS_CREDS_SUPPLEMENTARY_GIDS | SD_BUS_CREDS_AUGMENT
-            | SD_BUS_CREDS_PID | SD_BUS_CREDS_GID | SD_BUS_CREDS_UID;
+            | SD_BUS_CREDS_PID | SD_BUS_CREDS_GID | SD_BUS_CREDS_UID
+            | SD_BUS_CREDS_EUID;
     const gid_t *gids = NULL;
     int n_gids = 0;
     uid_t ruid, euid;
@@ -165,10 +198,8 @@ bool check_allowed(sd_bus *bus, struct conf_data *conf_data,
         break;
 
     case SUBJECT_KIND_SYSTEM_BUS_NAME:
-        if (bus == NULL) {
-            r = -EINVAL;
+        if (bus == NULL)
             goto end;
-        }
 
         r = sd_bus_get_name_creds(bus, subject->data.b.system_bus_name, mask, &creds);
         if (r < 0)
@@ -216,7 +247,7 @@ bool check_allowed(sd_bus *bus, struct conf_data *conf_data,
                 if (gids[j] == primary_gid) {
                     /* We only include supplementary gids in the check, not the
                        primary gid. This is to make it more difficult for
-                       processes to exec a setgid process to gain elevated
+                       processes to exec a setgid binary to gain elevated
                        group access. */
                        continue;
                 }
@@ -393,6 +424,22 @@ void print_decision(struct subject *subject, const char *action_id, bool allowed
         break;
     default:
         break;
+    }
+}
+
+void print_config(struct conf_data *conf_data)
+{
+    int i, j;
+
+    if (conf_data == NULL)
+        return;
+
+    for (i = 0; i < conf_data->n_lines; i++) {
+        fprintf(stdout, "id: %s, groups: ", conf_data->lines[i].id);
+        for (j = 0; j < conf_data->lines[i].n_groups; j++) {
+            fprintf(stdout, "%s ", conf_data->lines[i].groups[j]);
+        }
+        fprintf(stdout, "\n");
     }
 }
 
@@ -598,7 +645,7 @@ static int property_backend_version(sd_bus *bus, const char *path,
         const char *interface, const char *property, sd_bus_message *reply,
         void *userdata, sd_bus_error *error)
 {
-    return sd_bus_message_append(reply, "s", "0.1");
+    return sd_bus_message_append(reply, "s", "2.0");
 }
 
 static int property_backend_features(sd_bus *bus, const char *path,
@@ -839,18 +886,4 @@ int load_directory(struct conf_data *conf_data, const char *dirname)
 end:
     closedir(dir);
     return r;
-}
-
-const char *find_policy_file()
-{
-    struct stat s;
-    const char *dynamic_conf = "/etc/groupcheck.policy";
-    const char *default_conf = "/usr/share/defaults/etc/groupcheck.policy";
-
-    if (stat(dynamic_conf, &s) == 0)
-        return dynamic_conf;
-    else if (stat(default_conf, &s) == 0)
-        return default_conf;
-
-    return NULL;
 }

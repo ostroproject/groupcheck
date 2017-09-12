@@ -69,13 +69,12 @@ struct subject {
  * parameters, "data" is an input parameter. */
 int initialize_bus(sd_bus **bus, sd_bus_slot **slot, struct conf_data *data);
 
-/* Return the policy file path from the search paths. */
-const char *find_policy_file();
-
 /* Load a policy file. The resulting struct must be freed by the caller. */
 int load_file(struct conf_data *conf_data, const char *filename);
 int load_directory(struct conf_data *conf_data, const char *filename);
 
 /* Exported for test programs. */
+int get_start_time(pid_t pid, uint64_t *start);
 void print_decision(struct subject *subject, const char *action_id, bool allowed);
+void print_config(struct conf_data *conf_data);
 bool check_allowed(sd_bus *bus, struct conf_data *conf_data, struct subject *subject, const char *action_id);
