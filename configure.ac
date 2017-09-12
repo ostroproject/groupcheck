@@ -1,4 +1,4 @@
-AC_INIT([groupcheck], 0.1)
+AC_INIT([groupcheck], 2.0)
 AM_INIT_AUTOMAKE
 AC_PROG_CC
 AC_CONFIG_FILES(Makefile)

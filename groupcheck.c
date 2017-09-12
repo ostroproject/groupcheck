@@ -645,7 +645,7 @@ static int property_backend_version(sd_bus *bus, const char *path,
         const char *interface, const char *property, sd_bus_message *reply,
         void *userdata, sd_bus_error *error)
 {
-    return sd_bus_message_append(reply, "s", "0.1");
+    return sd_bus_message_append(reply, "s", "2.0");
 }
 
 static int property_backend_features(sd_bus *bus, const char *path,
