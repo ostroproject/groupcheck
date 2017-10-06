@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
     int r = -1, i;
     const char *action_id;
     const char *name = NULL;
-    bool *allowed;
+    bool *allowed = false;
     gid_t supplementary_groups[argc];
 
     if (argc < 2) {
@@ -92,7 +92,7 @@ int main(int argc, char *argv[])
     r = sd_bus_message_open_container(msg, SD_BUS_TYPE_ARRAY, "{sv}");
     if (r < 0)
         goto end;
-    
+
     r = sd_bus_message_open_container(msg, SD_BUS_TYPE_DICT_ENTRY, "sv");
     if (r < 0)
         goto end;
@@ -100,16 +100,16 @@ int main(int argc, char *argv[])
     r = sd_bus_message_append(msg, "s", "name");
     if (r < 0)
         goto end;
-    
+
     r = sd_bus_message_append(msg, "v", "s", name);
     if (r < 0)
         goto end;
-    
+
     /* dict entry */
     r = sd_bus_message_close_container(msg);
     if (r < 0)
         goto end;
-    
+
     /* array */
     r = sd_bus_message_close_container(msg);
     if (r < 0)
@@ -135,7 +135,7 @@ int main(int argc, char *argv[])
     r = sd_bus_message_append(msg, "s", "");
     if (r < 0)
         goto end;
-    
+
     r = sd_bus_call(bus, msg, 0, NULL, &reply);
     if (r < 0) {
         fprintf(stderr, "D-Bus method call failed: %s\n", strerror(-r));

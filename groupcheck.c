@@ -350,9 +350,10 @@ static int parse_subject(sd_bus_message *m, struct subject *subject)
                     return r;
 
                 if (strlen(value) >= MAX_NAME_SIZE)
-                    return r;
+                    return -EINVAL;
 
                 strncpy(subject->data.s.session_id, value, MAX_NAME_SIZE);
+                subject->data.s.session_id[MAX_NAME_SIZE-1] = '\0';
 
                 r = sd_bus_message_exit_container(m);
                 if (r < 0)
@@ -375,6 +376,7 @@ static int parse_subject(sd_bus_message *m, struct subject *subject)
                     return -EINVAL;
 
                 strncpy(subject->data.s.session_id, value, MAX_NAME_SIZE);
+                subject->data.s.session_id[MAX_NAME_SIZE-1] = '\0';
 
                 r = sd_bus_message_exit_container(m);
                 if (r < 0)
